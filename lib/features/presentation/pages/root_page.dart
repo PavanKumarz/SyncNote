@@ -16,7 +16,7 @@ class _RootPageState extends State<RootPage> {
 
   final pages = const [
     HomePage(),
-    GsearchPage(),
+    SearchPage(),
     SyncActivityPage(),
     SettingsPage(),
   ];

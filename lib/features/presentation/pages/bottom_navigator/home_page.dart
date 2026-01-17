@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:syncnote_engine/core/theme/color_helper.dart';
+import 'package:syncnote_engine/data/datasources/local/notes_db_heleper.dart';
 import 'package:syncnote_engine/features/presentation/pages/widgets/sidebar_menu.dart';
 import '../../../domain/models/note.dart';
 import '../editor_page.dart';
 import '../widgets/notegrid.dart';
 import '../widgets/notecard.dart';
-
-enum SyncStatus { synced, pending, conflict }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -17,22 +16,32 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   bool isGrid = true;
-  SyncStatus syncStatus = SyncStatus.synced;
 
-  ///  MASTER LIST
-  /// Contains BOTH active + trashed notes
+  /// MASTER LIST
   final List<NoteModel> notes = [];
 
-  ///  ACTIVE NOTES (NEW)
-
-  /// Used by Home screen
+  /// ACTIVE NOTES
   List<NoteModel> get activeNotes => notes.where((n) => !n.isTrashed).toList();
 
-  ///  TRASHED NOTES (NEW)
-  /// Used by Trash screen
+  /// TRASHED NOTES
   List<NoteModel> get trashedNotes => notes.where((n) => n.isTrashed).toList();
 
-  // Open note editor
+  @override
+  void initState() {
+    super.initState();
+    _loadNotes();
+  }
+
+  Future<void> _loadNotes() async {
+    final loadedNotes = await Databasehelper.instance.getAllNotes();
+    setState(() {
+      notes
+        ..clear()
+        ..addAll(loadedNotes);
+    });
+  }
+
+  /// OPEN EDITOR
   Future<void> _openEditor(NoteModel note) async {
     final updatedNote = await Navigator.push<NoteModel>(
       context,
@@ -40,19 +49,23 @@ class _HomePageState extends State<HomePage> {
     );
 
     if (updatedNote != null) {
+      await Databasehelper.instance.upsertNote(updatedNote);
+
       setState(() {
         final index = notes.indexWhere((n) => n.id == updatedNote.id);
         if (index != -1) {
           notes[index] = updatedNote;
+        } else {
+          notes.add(updatedNote);
         }
       });
     }
   }
 
-  //  Create new note
-  void _createNote() async {
+  /// CREATE NOTE
+  Future<void> _createNote() async {
     final emptyNote = NoteModel(
-      id: DateTime.now().toString(),
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
       title: '',
       content: '',
       updatedAt: DateTime.now(),
@@ -65,25 +78,30 @@ class _HomePageState extends State<HomePage> {
     );
 
     if (updatedNote != null) {
+      await Databasehelper.instance.upsertNote(updatedNote);
+
       setState(() {
         notes.add(updatedNote);
       });
     }
   }
 
-  ///  SOFT DELETE (NEW)
-  /// Moves note to Trash
-  void _deleteNote(NoteModel note) {
-    final index = notes.indexWhere((n) => n.id == note.id);
-    if (index != -1) {
-      setState(() {
+  /// MOVE TO TRASH
+  Future<void> _deleteNote(NoteModel note) async {
+    await Databasehelper.instance.trashNote(note.id);
+
+    setState(() {
+      final index = notes.indexWhere((n) => n.id == note.id);
+      if (index != -1) {
         notes[index] = notes[index].copyWith(isTrashed: true);
-      });
-    }
+      }
+    });
   }
 
-  ///  RESTORE NOTE (NEW)
-  void restoreNote(NoteModel note) {
+  /// RESTORE FROM TRASH
+  Future<void> restoreNote(NoteModel note) async {
+    await Databasehelper.instance.restoreNote(note.id);
+
     final index = notes.indexWhere((n) => n.id == note.id);
     if (index != -1) {
       setState(() {
@@ -92,8 +110,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  ///  DELETE FOREVER (NEW)
-  void deleteForever(NoteModel note) {
+  /// DELETE FOREVER
+  Future<void> deleteForever(NoteModel note) async {
+    await Databasehelper.instance.deleteForever(note.id);
+
     setState(() {
       notes.removeWhere((n) => n.id == note.id);
     });
@@ -107,7 +127,6 @@ class _HomePageState extends State<HomePage> {
         onRestore: restoreNote,
         onDeleteForever: deleteForever,
       ),
-
       appBar: AppBar(
         actions: [
           IconButton(
@@ -116,12 +135,10 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-
       floatingActionButton: FloatingActionButton(
         onPressed: _createNote,
         child: const Icon(Icons.add),
       ),
-
       body: Column(
         children: [
           Expanded(
@@ -132,14 +149,12 @@ class _HomePageState extends State<HomePage> {
                       textAlign: TextAlign.center,
                     ),
                   )
-                ///  GRID VIEW
                 : isGrid
                 ? NoteGrid(
                     notes: activeNotes,
                     onNoteTap: (i) => _openEditor(activeNotes[i]),
                     onDelete: (i) => _deleteNote(activeNotes[i]),
                   )
-                ///  LIST VIEW
                 : ListView.separated(
                     padding: const EdgeInsets.all(12),
                     itemCount: activeNotes.length,

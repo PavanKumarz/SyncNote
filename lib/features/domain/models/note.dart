@@ -8,7 +8,6 @@ class NoteModel {
   final bool? offline;
   final bool? conflict;
   final Color color;
-
   final bool isTrashed;
 
   NoteModel({
@@ -19,7 +18,7 @@ class NoteModel {
     this.offline,
     this.conflict,
     required this.color,
-    this.isTrashed = false, //  default
+    this.isTrashed = false,
   });
 
   NoteModel copyWith({
@@ -40,6 +39,30 @@ class NoteModel {
       conflict: conflict ?? this.conflict,
       color: color ?? this.color,
       isTrashed: isTrashed ?? this.isTrashed,
+    );
+  }
+
+  /// Convert NoteModel → SQLite Map
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'content': content,
+      'color': color.value, //  store int
+      'updated_at': updatedAt.millisecondsSinceEpoch,
+      'is_trashed': isTrashed ? 1 : 0,
+    };
+  }
+
+  /// Convert SQLite Map → NoteModel
+  factory NoteModel.fromMap(Map<String, dynamic> map) {
+    return NoteModel(
+      id: map['id'] as String,
+      title: map['title'] as String? ?? '',
+      content: map['content'] as String? ?? '',
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(map['updated_at'] as int),
+      color: Color(map['color'] as int), // int → Color
+      isTrashed: (map['is_trashed'] as int? ?? 0) == 1,
     );
   }
 }

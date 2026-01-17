@@ -16,7 +16,6 @@ class SyncNoteApp extends StatelessWidget {
 
       // REQUIRED for flutter_quill (otherwise crash)
       localizationsDelegates: const [FlutterQuillLocalizations.delegate],
-
       supportedLocales: const [Locale('en')],
 
       theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.deepPurple),

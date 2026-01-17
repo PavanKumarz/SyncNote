@@ -29,6 +29,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
     if (widget.note.content.trim().isNotEmpty) {
       try {
         final decoded = jsonDecode(widget.note.content);
+        //Delta.fromJson converts decoded JSON data into Quill’s internal document format.
         final delta = Delta.fromJson(decoded);
 
         quillController = QuillController(
@@ -36,7 +37,8 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
           selection: const TextSelection.collapsed(offset: 0),
         );
       } catch (_) {
-        quillController = QuillController.basic();
+        quillController =
+            QuillController.basic(); //It creates a new empty Quill editor controller, ready for the user to start typing.
       }
     } else {
       quillController = QuillController.basic();
@@ -48,7 +50,9 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
       context,
       widget.note.copyWith(
         title: titleController.text,
-        content: jsonEncode(quillController.document.toDelta().toJson()),
+        content: jsonEncode(
+          quillController.document.toDelta().toJson(),
+        ), //This line turns rich-text editor content into a JSON string so it can be saved.
         updatedAt: DateTime.now(),
       ),
     );

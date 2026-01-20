@@ -6,12 +6,14 @@ class NoteGrid extends StatelessWidget {
   final List<NoteModel> notes;
   final Function(int) onNoteTap;
   final Function(int) onDelete;
+  final Function(int)? onViewHistory;
 
   const NoteGrid({
     super.key,
     required this.notes,
     required this.onNoteTap,
     required this.onDelete,
+    this.onViewHistory, // ✅
   });
 
   @override
@@ -24,13 +26,23 @@ class NoteGrid extends StatelessWidget {
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
       ),
-      itemBuilder: (_, i) => NoteCard(
-        title: notes[i].title,
-        content: notes[i].content,
-        color: notes[i].color,
-        onTap: () => onNoteTap(i),
-        onDelete: () => onDelete(i),
-      ),
+      itemBuilder: (_, i) {
+        final note = notes[i];
+
+        return NoteCard(
+          title: note.title,
+          content: note.content,
+          color: note.color,
+
+          // single source of truth for sync UI
+          syncStatus: note.syncStatus,
+
+          onTap: () => onNoteTap(i),
+          onDelete: () => onDelete(i),
+          // PASS HISTORY
+          onViewHistory: onViewHistory == null ? null : () => onViewHistory!(i),
+        );
+      },
     );
   }
 }

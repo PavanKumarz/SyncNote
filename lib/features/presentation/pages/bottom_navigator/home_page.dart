@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:syncnote_engine/core/theme/color_helper.dart';
 import 'package:syncnote_engine/data/datasources/local/notes_db_heleper.dart';
+import 'package:syncnote_engine/features/domain/models/note_versions.dart';
+import 'package:syncnote_engine/features/presentation/pages/conflict_resolution_page.dart';
+import 'package:syncnote_engine/features/presentation/pages/note_versions_page.dart';
+import 'package:syncnote_engine/features/presentation/pages/service/sync_engine.dart';
 import 'package:syncnote_engine/features/presentation/pages/widgets/sidebar_menu.dart';
+import 'package:syncnote_engine/features/presentation/pages/widgets/sync_status.dart';
 import '../../../domain/models/note.dart';
 import '../editor_page.dart';
 import '../widgets/notegrid.dart';
@@ -17,7 +22,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   bool isGrid = true;
 
-  /// MASTER LIST
+  /// MASTER LIST (single source of truth)
   final List<NoteModel> notes = [];
 
   /// ACTIVE NOTES
@@ -30,6 +35,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadNotes();
+    SyncEngine.runOnce();
   }
 
   Future<void> _loadNotes() async {
@@ -41,25 +47,92 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  /// OPEN EDITOR
+  /// OPEN EDITOR / CONFLICT RESOLUTION
   Future<void> _openEditor(NoteModel note) async {
-    final updatedNote = await Navigator.push<NoteModel>(
-      context,
-      MaterialPageRoute(builder: (_) => NoteEditorPage(note: note)),
-    );
+    NoteModel? updatedNote;
+    bool wasConflictMerge = false;
 
-    if (updatedNote != null) {
-      await Databasehelper.instance.upsertNote(updatedNote);
+    // STRICT RULE: conflict notes cannot be edited directly
+    if (note.syncStatus == SyncStatus.conflict) {
+      final versions = await Databasehelper.instance.getVersions(note.id);
 
-      setState(() {
-        final index = notes.indexWhere((n) => n.id == updatedNote.id);
-        if (index != -1) {
-          notes[index] = updatedNote;
-        } else {
-          notes.add(updatedNote);
-        }
-      });
+      if (versions.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No versions found to resolve conflict'),
+          ),
+        );
+        return;
+      }
+
+      updatedNote = await Navigator.push<NoteModel>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ConflictResolutionPage(
+            localNote: note,
+            remoteVersion: versions.first,
+          ),
+        ),
+      );
+
+      wasConflictMerge = true;
+    } else {
+      updatedNote = await Navigator.push<NoteModel>(
+        context,
+        MaterialPageRoute(builder: (_) => NoteEditorPage(note: note)),
+      );
     }
+
+    if (updatedNote == null) return;
+
+    /// ===============================
+    /// VERSION CONTROL (FIXED)
+    /// ===============================
+
+    final hasChanged =
+        note.content != updatedNote.content || note.title != updatedNote.title;
+
+    // Always version merges OR real changes
+    if (hasChanged || wasConflictMerge) {
+      // BEFORE SNAPSHOT
+      await Databasehelper.instance.addVersion(
+        NoteVersion(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          noteId: note.id,
+          title: note.title,
+          content: note.content,
+          createdAt: DateTime.now(),
+          syncStatus: SyncStatus.synced,
+          label: wasConflictMerge ? 'Before merge' : 'Auto-save',
+        ),
+      );
+
+      // AFTER SNAPSHOT
+      await Databasehelper.instance.addVersion(
+        NoteVersion(
+          id: (DateTime.now().millisecondsSinceEpoch + 1).toString(),
+          noteId: note.id,
+          title: updatedNote.title,
+          content: updatedNote.content,
+          createdAt: DateTime.now(),
+          syncStatus: SyncStatus.pending,
+          label: wasConflictMerge ? 'Merged version' : 'Edit',
+        ),
+      );
+    }
+
+    /// SINGLE SOURCE OF TRUTH
+    await Databasehelper.instance.upsertNote(updatedNote);
+
+    /// UPDATE UI STATE
+    setState(() {
+      final index = notes.indexWhere((n) => n.id == updatedNote!.id);
+      if (index != -1) {
+        notes[index] = updatedNote!;
+      } else {
+        notes.add(updatedNote!);
+      }
+    });
   }
 
   /// CREATE NOTE
@@ -119,6 +192,56 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  /// OPEN VERSION HISTORY
+  Future<void> _openVersionHistory(NoteModel note) async {
+    final versions = await Databasehelper.instance.getVersions(note.id);
+
+    if (!mounted) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NoteVersionsPage(
+          currentNote: note,
+          versions: versions,
+          onRestore: (version) async {
+            final restoredNote = note.copyWith(
+              title: version.title,
+              content: version.content,
+              updatedAt: DateTime.now(),
+              syncStatus: SyncStatus.pending,
+            );
+
+            await Databasehelper.instance.upsertNote(restoredNote);
+
+            setState(() {
+              final index = notes.indexWhere((n) => n.id == note.id);
+              if (index != -1) {
+                notes[index] = restoredNote;
+              }
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _simulateConflict(NoteModel note) async {
+    final conflictedNote = note.copyWith(
+      syncStatus: SyncStatus.conflict,
+      updatedAt: DateTime.now(),
+    );
+
+    await Databasehelper.instance.upsertNote(conflictedNote);
+
+    setState(() {
+      final index = notes.indexWhere((n) => n.id == note.id);
+      if (index != -1) {
+        notes[index] = conflictedNote;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -129,6 +252,15 @@ class _HomePageState extends State<HomePage> {
       ),
       appBar: AppBar(
         actions: [
+          IconButton(
+            icon: const Icon(Icons.warning),
+            tooltip: 'Simulate conflict',
+            onPressed: () {
+              if (activeNotes.isNotEmpty) {
+                _simulateConflict(activeNotes.first);
+              }
+            },
+          ),
           IconButton(
             icon: Icon(isGrid ? Icons.view_list : Icons.grid_view),
             onPressed: () => setState(() => isGrid = !isGrid),
@@ -154,6 +286,7 @@ class _HomePageState extends State<HomePage> {
                     notes: activeNotes,
                     onNoteTap: (i) => _openEditor(activeNotes[i]),
                     onDelete: (i) => _deleteNote(activeNotes[i]),
+                    onViewHistory: (i) => _openVersionHistory(activeNotes[i]),
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.all(12),
@@ -163,10 +296,10 @@ class _HomePageState extends State<HomePage> {
                       title: activeNotes[i].title,
                       content: activeNotes[i].content,
                       color: activeNotes[i].color,
-                      offline: activeNotes[i].offline ?? false,
-                      conflict: activeNotes[i].conflict ?? false,
+                      syncStatus: activeNotes[i].syncStatus,
                       onTap: () => _openEditor(activeNotes[i]),
                       onDelete: () => _deleteNote(activeNotes[i]),
+                      onViewHistory: () => _openVersionHistory(activeNotes[i]),
                     ),
                   ),
           ),

@@ -14,12 +14,7 @@ class RootPage extends StatefulWidget {
 class _RootPageState extends State<RootPage> {
   int index = 0;
 
-  final pages = const [
-    HomePage(),
-    SearchPage(),
-    SyncActivityPage(),
-    SettingsPage(),
-  ];
+  final pages = const [HomePage(), SearchPage(), SyncPage(), SettingsPage()];
 
   @override
   Widget build(BuildContext context) {

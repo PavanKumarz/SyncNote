@@ -2,8 +2,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter_quill/quill_delta.dart';
+import 'package:syncnote_engine/data/datasources/local/notes_db_heleper.dart';
 import 'package:syncnote_engine/features/domain/models/note.dart';
+import 'package:syncnote_engine/features/domain/models/note_versions.dart';
 import 'package:syncnote_engine/features/presentation/pages/widgets/note_editor_tool_page.dart';
+import 'package:syncnote_engine/features/presentation/pages/widgets/sync_status.dart';
 
 class NoteEditorPage extends StatefulWidget {
   final NoteModel note;
@@ -29,7 +32,6 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
     if (widget.note.content.trim().isNotEmpty) {
       try {
         final decoded = jsonDecode(widget.note.content);
-        //Delta.fromJson converts decoded JSON data into Quill’s internal document format.
         final delta = Delta.fromJson(decoded);
 
         quillController = QuillController(
@@ -37,25 +39,47 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
           selection: const TextSelection.collapsed(offset: 0),
         );
       } catch (_) {
-        quillController =
-            QuillController.basic(); //It creates a new empty Quill editor controller, ready for the user to start typing.
+        quillController = QuillController.basic();
       }
     } else {
       quillController = QuillController.basic();
     }
   }
 
-  void _saveAndClose() {
-    Navigator.pop(
-      context,
-      widget.note.copyWith(
-        title: titleController.text,
-        content: jsonEncode(
-          quillController.document.toDelta().toJson(),
-        ), //This line turns rich-text editor content into a JSON string so it can be saved.
-        updatedAt: DateTime.now(),
-      ),
+  Future<bool> _saveAndClose() async {
+    if (widget.note.syncStatus == SyncStatus.conflict) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Resolve conflict before editing')),
+      );
+      return false;
+    }
+
+    final updatedNote = widget.note.copyWith(
+      title: titleController.text,
+      content: jsonEncode(quillController.document.toDelta().toJson()),
+      updatedAt: DateTime.now(),
+      syncStatus: SyncStatus.pending,
     );
+
+    final version = NoteVersion(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      noteId: updatedNote.id,
+      title: updatedNote.title,
+      content: updatedNote.content,
+      createdAt: DateTime.now(),
+      syncStatus: updatedNote.syncStatus,
+      label: 'Auto-save',
+    );
+
+    await Databasehelper.instance.addVersion(version);
+    await Databasehelper.instance.enqueueSync(
+      noteId: version.noteId,
+      versionId: version.id,
+      action: 'update',
+    );
+
+    Navigator.pop(context, updatedNote);
+    return true;
   }
 
   void _deleteNote(BuildContext context) {
@@ -64,52 +88,72 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
       updatedAt: DateTime.now(),
     );
 
-    Navigator.pop(context, trashedNote); //send back
+    Navigator.pop(context, trashedNote);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Edit note'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: _saveAndClose,
-        ),
-      ),
-
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: TextField(
-              controller: titleController,
-              decoration: const InputDecoration(
-                hintText: 'Title',
-                border: InputBorder.none,
-              ),
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+    return WillPopScope(
+      onWillPop: () async {
+        final didpop = await _saveAndClose();
+        return didpop;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Edit note'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () async {
+              await _saveAndClose();
+            },
           ),
-          Expanded(
-            child: Padding(
+        ),
+
+        body: Column(
+          children: [
+            if (widget.note.syncStatus == SyncStatus.conflict)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                color: Colors.red.shade100,
+                child: const Text(
+                  'This note has a sync conflict. Please resolve it.',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+
+            Padding(
               padding: const EdgeInsets.all(12),
-              child: QuillEditor.basic(
-                controller: quillController,
-                focusNode: editorFocusNode,
-                config: const QuillEditorConfig(
-                  placeholder: 'Start Writing...',
+              child: TextField(
+                controller: titleController,
+                decoration: const InputDecoration(
+                  hintText: 'Title',
+                  border: InputBorder.none,
+                ),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: AbsorbPointer(
+                  absorbing: widget.note.syncStatus == SyncStatus.conflict,
+                  child: QuillEditor.basic(
+                    controller: quillController,
+                    focusNode: editorFocusNode,
+                    config: const QuillEditorConfig(
+                      placeholder: 'Start Writing...',
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
-      ),
-
-      ///  FULL-WIDTH BOTTOM BAR
-      bottomNavigationBar: NoteToolbar(
-        controller: quillController,
-        onDelete: () => _deleteNote(context),
+          ],
+        ),
+        bottomNavigationBar: NoteToolbar(
+          controller: quillController,
+          onDelete: () => _deleteNote(context),
+        ),
       ),
     );
   }

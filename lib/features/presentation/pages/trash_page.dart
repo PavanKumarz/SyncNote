@@ -19,9 +19,7 @@ class TrashPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Trash')),
       body: trashedNotes.isEmpty
-          ? const Center(
-              child: Text('Trash is empty', style: TextStyle(fontSize: 16)),
-            )
+          ? const Center(child: Text('Trash is empty'))
           : ListView.separated(
               padding: const EdgeInsets.all(12),
               itemCount: trashedNotes.length,
@@ -33,70 +31,41 @@ class TrashPage extends StatelessWidget {
                   title: note.title,
                   content: note.content,
                   color: note.color,
-                  offline: note.offline ?? false,
-                  conflict: note.conflict ?? false,
 
-                  //  Tap does nothing in trash
+                  syncStatus: note.syncStatus,
+
                   onTap: null,
-
-                  //  Long press → options
-                  onDelete: () {
-                    _showTrashActions(
-                      context,
-                      note,
-                      onRestore,
-                      onDeleteForever,
-                    );
-                  },
+                  onDelete: () => _showTrashActions(context, note),
                 );
               },
             ),
     );
   }
 
-  /// Bottom sheet for trash actions
-  void _showTrashActions(
-    BuildContext context,
-
-    NoteModel note,
-    Function(NoteModel) onRestore,
-    Function(NoteModel) onDeleteForever,
-  ) {
+  void _showTrashActions(BuildContext context, NoteModel note) {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) {
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.restore),
-                title: const Text('Restore'),
-                onTap: () {
-                  Navigator.pop(context);
-                  onRestore(note);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_forever, color: Colors.red),
-                title: const Text(
-                  'Delete forever',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  onDeleteForever(note);
-                },
-              ),
-              const SizedBox(height: 8),
-            ],
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.restore),
+            title: const Text('Restore'),
+            onTap: () {
+              Navigator.pop(context);
+              onRestore(note);
+            },
           ),
-        );
-      },
+          ListTile(
+            leading: const Icon(Icons.delete_forever),
+            title: const Text('Delete forever'),
+            onTap: () {
+              Navigator.pop(context);
+              onDeleteForever(note);
+            },
+          ),
+        ],
+      ),
     );
   }
 }

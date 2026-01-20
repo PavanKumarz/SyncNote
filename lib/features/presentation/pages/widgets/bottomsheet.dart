@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
 class DeleteBottomSheet {
-  static void show(BuildContext context, {required VoidCallback onDelete}) {
+  static void show(
+    BuildContext context, {
+    required VoidCallback onDelete,
+    VoidCallback? onViewHistory,
+  }) {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -26,7 +30,18 @@ class DeleteBottomSheet {
                   ),
                 ),
               ),
-
+              // NEW: View history
+              if (onViewHistory != null)
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      onViewHistory();
+                    },
+                    child: const Text('View history'),
+                  ),
+                ),
               // Delete button
               SizedBox(
                 child: ElevatedButton(
